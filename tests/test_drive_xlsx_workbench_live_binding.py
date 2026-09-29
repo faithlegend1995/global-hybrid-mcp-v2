@@ -7,6 +7,7 @@ import urllib.error
 import pytest
 
 from global_hybrid_v2.adapters.drive_xlsx_workbench import (
+    DRIVE_WORKBENCH_SCOPE,
     GoogleDriveRestTransport,
     WorkbenchCapabilityDebt,
     WorkbenchClaimHttpTransport,
@@ -38,7 +39,10 @@ def test_drive_transport_binds_exact_file_id_mime_and_bearer():
 
     def opener(request, timeout):
         calls.append((request, timeout))
-        if request.full_url.endswith("alt=media"):
+        url = request.full_url
+        if "files?" in url and "alt=media" not in url:
+            return Response({"files": [{"id": "drive-file-1"}]})
+        if url.endswith("alt=media"):
             return Response(b"xlsx")
         return Response(
             {
@@ -70,6 +74,37 @@ def test_drive_transport_rejects_target_and_mime_mismatch():
 
     with pytest.raises(WorkbenchConflict, match="TARGET_MIME_MISMATCH"):
         GoogleDriveRestTransport(lambda: "token", opener=wrong_mime).metadata("drive-file-1")
+
+
+def test_drive_transport_replace_fails_closed_on_bad_visible_corpus():
+    empty_case: dict = {"files": []}
+    two_case: dict = {"files": [{"id": "a"}, {"id": "b"}]}
+    wrong_id_case: dict = {"files": [{"id": "other"}]}
+
+    for bad_response in (empty_case, two_case, wrong_id_case):
+        calls = []
+
+        def bad_opener(request, timeout):
+            calls.append((request, timeout))
+            url = request.full_url
+            if "files?" in url and "alt=media" not in url:
+                return Response(bad_response)
+            if url.endswith("alt=media"):
+                return Response(b"xlsx")
+            return Response(
+                {
+                    "id": "drive-file-1",
+                    "version": "7",
+                    "mimeType": GoogleDriveRestTransport.XLSX_MIME,
+                    "modifiedTime": "2026-09-27T00:00:00Z",
+                }
+            )
+
+        transport = GoogleDriveRestTransport(lambda: "token", opener=bad_opener)
+        with pytest.raises(WorkbenchConflict, match="HOLD_VISIBLE_CORPUS_NOT_EXACTLY_ONE_TARGET"):
+            transport.replace("drive-file-1", b"new", GoogleDriveRestTransport.XLSX_MIME)
+        patch_calls = [c for c in calls if c[0].method == "PATCH"]
+        assert len(patch_calls) == 0
 
 
 def test_claim_transport_uses_only_three_bounded_control_paths_and_bearer_secret():
