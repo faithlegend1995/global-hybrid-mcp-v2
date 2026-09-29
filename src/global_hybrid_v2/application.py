@@ -5,6 +5,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from global_hybrid_v2.adapters.drive_xlsx_workbench import (
+    DRIVE_WORKBENCH_SCOPE,
     DriveXlsxWorkbenchPort,
     GoogleDriveRestTransport,
     WorkbenchClaimHttpTransport,
@@ -159,7 +160,7 @@ def create_application(
         if credential is not None and claim_secret is not None and claim_url:
             identity = ServiceAccountIdentity.from_json(credential.get_secret_value())
             tokens = ServiceAccountAccessTokenProvider(
-                identity, scopes=("https://www.googleapis.com/auth/drive.file",),
+                identity, scopes=(DRIVE_WORKBENCH_SCOPE,),
             )
             completion_handler = CompanyCommercialCompletionHandler(
                 writer=DriveXlsxWorkbenchPort(
