@@ -14,6 +14,8 @@ class WorkbenchCapabilityDebt(RuntimeError): ...
 class WorkbenchConflict(RuntimeError): ...
 class WorkbenchPostwriteMismatch(RuntimeError): ...
 
+DRIVE_WORKBENCH_SCOPE = "https://www.googleapis.com/auth/drive"
+
 
 class DriveTransport(Protocol):
     def metadata(self, file_id: str) -> dict: ...
@@ -95,6 +97,30 @@ class GoogleDriveRestTransport:
             raise WorkbenchConflict("WORKBENCH_FILE_ID_REQUIRED")
         return urllib.parse.quote(file_id, safe="")
 
+    def _assert_only_visible_file(self, file_id: str) -> None:
+        query = urllib.parse.urlencode({
+            "q": self._quoted("trashed=false"),
+            "spaces": "drive",
+            "corpora": "user",
+            "pageSize": "2",
+            "fields": "files(id),nextPageToken",
+        })
+        result = self._request(
+            f"{self.FILES_BASE}?{query}",
+            method="GET",
+            expect_json=True,
+        )
+        if "nextPageToken" in result:
+            raise WorkbenchConflict("HOLD_VISIBLE_CORPUS_NOT_EXACTLY_ONE_TARGET")
+        files = result.get("files")
+        if not isinstance(files, list) or len(files) != 1:
+            raise WorkbenchConflict("HOLD_VISIBLE_CORPUS_NOT_EXACTLY_ONE_TARGET")
+        sole = files[0]
+        if not isinstance(sole, dict):
+            raise WorkbenchConflict("HOLD_VISIBLE_CORPUS_NOT_EXACTLY_ONE_TARGET")
+        if sole.get("id") != file_id:
+            raise WorkbenchConflict("HOLD_VISIBLE_CORPUS_NOT_EXACTLY_ONE_TARGET")
+
     def metadata(self, file_id: str) -> dict:
         quoted = self._quoted(file_id)
         result = self._request(
@@ -121,6 +147,7 @@ class GoogleDriveRestTransport:
     def replace(self, file_id: str, payload: bytes, mime_type: str) -> dict:
         if mime_type != self.XLSX_MIME:
             raise WorkbenchConflict("WORKBENCH_TARGET_MIME_MISMATCH")
+        self._assert_only_visible_file(file_id)
         quoted = self._quoted(file_id)
         result = self._request(
             f"{self.UPLOAD_BASE}/{quoted}?uploadType=media&fields=id,version,mimeType,modifiedTime",
@@ -203,7 +230,13 @@ class DriveXlsxWorkbenchPort:
         self.drive = drive
         self.claims = claims
 
-    def write(self, *, task_id: str, intent_sha256: str, new_bytes: bytes) -> WorkbenchWriteReceipt:
+    def write(
+        self,
+        *,
+        task_id: str,
+        intent_sha256: str,
+        new_bytes: bytes,
+    ) -> WorkbenchWriteReceipt:
         """Compatibility path for the isolated qualification command."""
         return self.mutate(
             task_id=task_id,
@@ -228,8 +261,10 @@ class DriveXlsxWorkbenchPort:
             raise WorkbenchCapabilityDebt("DRIVE_VERSION_UNAVAILABLE")
         pre_bytes = self.drive.download(self.file_id)
         pre_sha = sha256_hex(pre_bytes)
-        if ((expected_preimage_version is not None and pre_version != expected_preimage_version)
-            or (expected_preimage_sha256 is not None and pre_sha != expected_preimage_sha256)):
+        if (
+            (expected_preimage_version is not None and pre_version != expected_preimage_version)
+            or (expected_preimage_sha256 is not None and pre_sha != expected_preimage_sha256)
+        ):
             raise WorkbenchConflict("HOLD_STALE_PREIMAGE")
         new_bytes = build_new_bytes(pre_bytes)
         if not isinstance(new_bytes, (bytes, bytearray)):
@@ -313,4 +348,4 @@ class DriveXlsxWorkbenchPort:
             post_version,
             post_sha,
             claim_id,
-        )
+    )
