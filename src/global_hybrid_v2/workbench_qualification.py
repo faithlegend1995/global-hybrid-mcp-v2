@@ -10,6 +10,7 @@ from collections.abc import Mapping
 from dataclasses import asdict, dataclass
 
 from global_hybrid_v2.adapters.drive_xlsx_workbench import (
+    DRIVE_WORKBENCH_SCOPE,
     DriveXlsxWorkbenchPort,
     GoogleDriveRestTransport,
     WorkbenchCapabilityDebt,
@@ -20,7 +21,6 @@ from global_hybrid_v2.adapters.drive_xlsx_workbench import (
 from global_hybrid_v2.google_auth import ServiceAccountAccessTokenProvider, ServiceAccountIdentity
 from global_hybrid_v2.runtime.deployment import RuntimeIdentity, read_runtime_identity
 
-DRIVE_FILE_SCOPE = "https://www.googleapis.com/auth/drive.file"
 REQUIRED_SHEETS = (
     "摘要",
     "AI工作主表",
@@ -130,7 +130,7 @@ def _probe_bytes(payload: bytes) -> bytes:
 def build_port(binding: QualificationBinding) -> DriveXlsxWorkbenchPort:
     token_provider = ServiceAccountAccessTokenProvider(
         ServiceAccountIdentity.from_json(binding.google_service_account_json),
-        scopes=(DRIVE_FILE_SCOPE,),
+        scopes=(DRIVE_WORKBENCH_SCOPE,),
     )
     drive = GoogleDriveRestTransport(token_provider)
     claims = WorkbenchClaimHttpTransport(
